@@ -7,7 +7,7 @@ to **Hermes Agent** and **OpenClaw** as a custom OpenAI-compatible model provide
 
 ## Hermes Agent
 
-### Prerequisite: Add provider to config
+### Step 1: Add provider to config
 
 Add this block to `~/.hermes/config.yaml`:
 
@@ -24,15 +24,24 @@ providers:
 > **Note:** `--base-url` is not a CLI flag in this Hermes version — the provider
 > **must** be defined in config to use a non-default endpoint.
 
-### Use it
+### Step 2: Use it
 
 ```bash
-# One-shot query (global -z flag):
-hermes -z "What's new in M365?" -p copilot365
+# One-shot query (quiet mode):
+hermes chat -q "What's new in M365?" --provider copilot365 --model copilot-chat -Q
 
-# Interactive chat session:
-hermes chat -p copilot365
+# Interactive session:
+hermes chat --provider copilot365 --model copilot-chat
+
+# If you're adding it as your default provider in config.yaml:
+#   default_provider: copilot365
+#   model:
+#     default: copilot-chat
+# Then just: hermes chat -q "prompt"
 ```
+
+> `-q` = one-shot query string, `-Q` = quiet mode (suppress banner/spinner).
+> Both `--provider` and `--model` are required together when using `chat -q`.
 
 ### As a fallback provider
 
@@ -170,4 +179,5 @@ Before wiring either agent:
 | `401` from proxy | Token expired or missing | Re-run `python oauth.py device-code` |
 | `model not allowed` (OpenClaw) | Model missing from allowlist | Add `copilot365/copilot-chat` to `agents.defaults.models` |
 | `Provider not found` (Hermes) | Provider not in config | Add `copilot365` under `providers:` in `~/.hermes/config.yaml` |
+| `--provider requires --model` | Both flags must be passed together | Add `--model copilot-chat` alongside `--provider copilot365` |
 | `404 /v1/models` | Old proxy version | Restart proxy with latest `server.py` |

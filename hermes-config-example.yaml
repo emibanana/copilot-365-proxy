@@ -10,8 +10,8 @@ providers:
     transport: chat_completions
 
 # Then use it:
-#   hermes -z "prompt" -p copilot365
-#   hermes chat -p copilot365
+#   hermes chat -q "prompt" --provider copilot365 --model copilot-chat -Q
+#   hermes chat --provider copilot365 --model copilot-chat
 
 # As a fallback provider (example):
 # fallback_providers:

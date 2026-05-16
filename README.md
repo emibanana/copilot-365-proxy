@@ -90,14 +90,14 @@ chmod +x copilot365-proxy
 ### 5. Use it
 
 ```bash
-# Test with curl
+# Quick test with curl
 curl -X POST http://127.0.0.1:8081/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{"model":"copilot-chat","messages":[{"role":"user","content":"Hello"}]}'
 
-# Configure your AI agent (Hermes, etc.):
-#   provider: custom
-#   base_url: http://127.0.0.1:8081/v1
+# Configure Hermes (see USAGE.md for full guide):
+# Add provider to ~/.hermes/config.yaml then:
+hermes chat -q "What's new?" --provider copilot365 --model copilot-chat -Q
 ```
 
 ## Files
