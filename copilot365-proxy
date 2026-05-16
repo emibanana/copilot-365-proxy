@@ -1,0 +1,90 @@
+#!/usr/bin/env python3
+"""Copilot365 proxy service manager — start/stop/status."""
+import subprocess
+import sys
+import os
+from pathlib import Path
+
+SERVICE_DIR = Path.home() / ".hermes/services/copilot365-proxy"
+PIDFILE = SERVICE_DIR / "proxy.pid"
+
+
+def _env_exists() -> bool:
+    return (SERVICE_DIR / ".env").exists()
+
+
+def ensure_env():
+    if not _env_exists():
+        print("ERROR: .env not configured.")
+        print(f"  cp {SERVICE_DIR}/.env.example {SERVICE_DIR}/.env")
+        print(f"  Edit {SERVICE_DIR}/.env with your Azure AD credentials.")
+        sys.exit(1)
+
+
+def start():
+    ensure_env()
+    if PIDFILE.exists():
+        try:
+            pid = int(PIDFILE.read_text())
+            os.kill(pid, 0)
+            print(f"Proxy already running (PID {pid})")
+            return
+        except OSError:
+            PIDFILE.unlink(missing_ok=True)
+
+    print("Starting Copilot365 proxy service...")
+    log_path = SERVICE_DIR / "proxy.log"
+    log_fh = open(log_path, "a")
+    proc = subprocess.Popen(
+        [sys.executable, "server.py"],
+        cwd=SERVICE_DIR,
+        stdout=log_fh,
+        stderr=subprocess.STDOUT,
+        start_new_session=True,
+    )
+    PIDFILE.write_text(str(proc.pid))
+    print(f"Proxy started (PID {proc.pid}) -> http://127.0.0.1:8081")
+    print(f"  To stop: copilot365-proxy stop")
+    print(f"  To view logs: tail -f {log_path}")
+
+
+def stop():
+    if not PIDFILE.exists():
+        print("No running proxy found (no PID file).")
+        return
+    pid = int(PIDFILE.read_text())
+    try:
+        os.kill(pid, 15)  # SIGTERM
+        print(f"Stopped proxy (PID {pid})")
+    except OSError:
+        print(f"Process {pid} not running (stale PID file removed).")
+    finally:
+        PIDFILE.unlink(missing_ok=True)
+
+
+def status():
+    if PIDFILE.exists():
+        pid = int(PIDFILE.read_text())
+        try:
+            os.kill(pid, 0)
+            print(f"Proxy running (PID {pid}) -> http://127.0.0.1:8081")
+            return
+        except OSError:
+            print("PID file exists but process not running (stale).")
+    else:
+        print("Proxy not running.")
+
+
+if __name__ == "__main__":
+    if len(sys.argv) < 2:
+        print("Usage: copilot365-proxy [start|stop|status]")
+        sys.exit(1)
+    cmd = sys.argv[1].lower()
+    if cmd == "start":
+        start()
+    elif cmd == "stop":
+        stop()
+    elif cmd == "status":
+        status()
+    else:
+        print(f"Unknown command: {cmd}")

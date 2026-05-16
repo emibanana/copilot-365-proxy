@@ -1,0 +1,23 @@
+# .gitignore for copilot-364-hermes-proxy
+
+# Environment files with secrets
+.env
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Runtime files
+*.pid
+*.log
+
+# OAuth token cache
+copilot365_token.json
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store

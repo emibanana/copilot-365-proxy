@@ -1,0 +1,17 @@
+# Optional: Install as a user systemd service
+# Place at ~/.config/systemd/user/copilot365-proxy.service
+
+[Unit]
+Description=Copilot365 Proxy — Microsoft 365 Copilot for AI Agents
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.hermes/services/copilot365-proxy
+ExecStart=%h/.local/bin/copilot365-proxy start
+ExecStop=%h/.local/bin/copilot365-proxy stop
+Restart=on-failure
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target
