@@ -1,17 +1,6 @@
 # Microsoft 365 Copilot → OpenAI Proxy
-<p align="center">
-  <a href="https://buymeacoffee.com/rusty4" target="_blank">
-    <img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50">
-  </a>
-</p>
-
-
 
 > **⚠️ Proof of Concept** — This is a functional prototype, not a production-ready integration. Microsoft 365 Copilot's Graph API has undocumented context window limits (~16K-32K effective tokens) and enforces usage restrictions (rate limits, content filtering, auth scoping). The proxy handles conversation rotation to mitigate context limits (see [Context Window Management](#context-window-management)), but reliability in long-running or high-throughput scenarios is not guaranteed. Use at your own risk.
-
-<p align="center">
-  <img src="logo.jpg" alt="Copilot 365 Hermes Proxy" width="300">
-</p>
 
 A local FastAPI proxy that translates **OpenAI-compatible `/v1/chat/completions`** requests into **Microsoft Graph Copilot Chat API** calls. Designed for use with AI agent frameworks (like Hermes Agent) that support custom OpenAI-format providers.
 
