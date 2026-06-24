@@ -262,9 +262,9 @@ def pkce_flow():
 if __name__ == "__main__":
     import sys
 
-    if not all([AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_CLIENT_SECRET]):
+    if not all([AZURE_TENANT_ID, AZURE_CLIENT_ID]):
         print("ERROR: Missing Azure credentials.")
-        print("Ensure .env has AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET.")
+        print("Ensure .env has AZURE_TENANT_ID and AZURE_CLIENT_ID.")
         sys.exit(1)
 
     cached = get_cached_token()

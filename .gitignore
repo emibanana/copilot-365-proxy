@@ -1,8 +1,5 @@
 # .gitignore for copilot-364-hermes-proxy
 
-# Environment files with secrets
-.env
-
 # Python cache
 __pycache__/
 *.pyc
