@@ -15,8 +15,14 @@ load_dotenv()
 
 GRAPH_VERSION = os.getenv("GRAPH_API_VERSION", "beta")
 
-# In-memory conversation store: user OID -> {"conversation_id": str, "turn_count": int}
+# In-memory conversation store: "{user_oid}:{model}" -> {"conversation_id": str, "turn_count": int}
 _user_conversations: dict[str, dict] = {}
+
+# Cache for discovered Copilot agents: refreshed on demand
+_agents_cache: dict = {"data": None, "fetched_at": 0}
+_AGENTS_CACHE_TTL = 300  # seconds
+
+DEFAULT_MODEL_ID = "copilot-chat"
 
 # Max turns before rotating to a fresh conversation (avoids token-limit issues)
 MAX_TURNS_PER_CONVERSATION = int(os.getenv("COPILOT_MAX_TURNS", "50"))
@@ -51,16 +57,60 @@ def _load_token():
         raise HTTPException(500, detail=f"Token error: {e}") from e
 
 
-def _create_conversation(access_token: str) -> dict:
-    """Create a new Copilot conversation and return tracking data."""
+def _discover_copilot_agents(access_token: str) -> list[dict]:
+    """Fetch available Copilot agents/extensions from Graph API with caching."""
+    now = time.time()
+    if _agents_cache["data"] is not None and now - _agents_cache["fetched_at"] < _AGENTS_CACHE_TTL:
+        return _agents_cache["data"]
+
+    headers = {"Authorization": f"Bearer {access_token}"}
+    resp = requests.get(
+        f"https://graph.microsoft.com/{GRAPH_VERSION}/copilot/extensions",
+        headers=headers,
+        timeout=15,
+    )
+    if resp.status_code == 200:
+        agents = resp.json().get("value", [])
+        _agents_cache["data"] = agents
+        _agents_cache["fetched_at"] = now
+        return agents
+
+    # Endpoint unavailable (not all tenants have it) — return empty
+    _agents_cache["data"] = []
+    _agents_cache["fetched_at"] = now
+    return []
+
+
+def _agent_id_from_model(model: str) -> Optional[str]:
+    """Extract the raw agent/extension ID from a model string like 'copilot-agent-<id>'."""
+    if model.startswith("copilot-agent-"):
+        return model[len("copilot-agent-"):]
+    return None
+
+
+def _create_conversation(access_token: str, model: str = DEFAULT_MODEL_ID) -> dict:
+    """Create a new Copilot conversation, optionally binding it to an agent."""
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
+    body: dict = {}
+    agent_id = _agent_id_from_model(model)
+    if agent_id:
+        body["copilotAgent"] = {
+            "agentDefinition": {
+                "extensions": [
+                    {
+                        "@odata.type": "#microsoft.graph.aiPlugin",
+                        "extensionId": agent_id,
+                    }
+                ]
+            }
+        }
     create = requests.post(
         f"https://graph.microsoft.com/{GRAPH_VERSION}/copilot/conversations",
         headers=headers,
-        json={},
+        json=body,
         timeout=30,
     )
     if create.status_code not in (200, 201):
@@ -72,28 +122,29 @@ def _create_conversation(access_token: str) -> dict:
     return {"conversation_id": conversation_id, "turn_count": 0, "user_oid": _get_user_oid(access_token)}
 
 
-def _call_copilot(access_token: str, user_message: str) -> dict:
+def _call_copilot(access_token: str, user_message: str, model: str = DEFAULT_MODEL_ID) -> dict:
     """Call the Microsoft Graph Copilot API and return the response data."""
     user_oid = _get_user_oid(access_token)
+    conv_key = f"{user_oid}:{model}"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
         "Content-Type": "application/json",
     }
 
-    # Get or create a conversation
-    conv_data = _user_conversations.get(user_oid)
+    # Get or create a per-(user, model) conversation
+    conv_data = _user_conversations.get(conv_key)
     if not conv_data:
-        conv_data = _create_conversation(access_token)
+        conv_data = _create_conversation(access_token, model)
         conversation_id = conv_data["conversation_id"]
-        _user_conversations[user_oid] = conv_data
+        _user_conversations[conv_key] = conv_data
     else:
         conversation_id = conv_data["conversation_id"]
         # Rotate if too many turns (prevents hitting Copilot's context window limit)
         if conv_data["turn_count"] >= MAX_TURNS_PER_CONVERSATION:
-            conv_data = _create_conversation(access_token)
+            conv_data = _create_conversation(access_token, model)
             conversation_id = conv_data["conversation_id"]
-            _user_conversations[user_oid] = conv_data
+            _user_conversations[conv_key] = conv_data
 
     # Send the chat message
     tz = os.getenv("USER_TIMEZONE", "UTC")
@@ -112,10 +163,10 @@ def _call_copilot(access_token: str, user_message: str) -> dict:
     # Handle stale conversations (404/410/400 -> recreate)
     if chat_resp.status_code not in (200, 201):
         if chat_resp.status_code in (404, 410, 400):
-            _user_conversations.pop(user_oid, None)
-            conv_data2 = _create_conversation(access_token)
+            _user_conversations.pop(conv_key, None)
+            conv_data2 = _create_conversation(access_token, model)
             conversation_id = conv_data2["conversation_id"]
-            _user_conversations[user_oid] = conv_data2
+            _user_conversations[conv_key] = conv_data2
             chat_resp = requests.post(
                 f"https://graph.microsoft.com/{GRAPH_VERSION}/copilot/conversations/{conversation_id}/chat",
                 headers=headers,
@@ -126,7 +177,7 @@ def _call_copilot(access_token: str, user_message: str) -> dict:
             raise HTTPException(chat_resp.status_code, detail=chat_resp.text)
 
     # Increment turn counter
-    conv_entry = _user_conversations.get(user_oid)
+    conv_entry = _user_conversations.get(conv_key)
     if conv_entry and conv_entry.get("conversation_id") == conversation_id:
         conv_entry["turn_count"] = conv_entry.get("turn_count", 0) + 1
 
@@ -173,18 +224,36 @@ def root():
 
 @app.get("/v1/models")
 def list_models():
-    """OpenAI-compatible model list endpoint — required by Hermes for provider init."""
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": "copilot-chat",
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "microsoft-365",
-            }
-        ],
-    }
+    """OpenAI-compatible model list — includes default Copilot plus any discovered agents."""
+    now = int(time.time())
+    models = [
+        {
+            "id": DEFAULT_MODEL_ID,
+            "object": "model",
+            "created": now,
+            "owned_by": "microsoft-365",
+        }
+    ]
+    try:
+        access_token = _load_token()
+        agents = _discover_copilot_agents(access_token)
+        for agent in agents:
+            agent_id = agent.get("id") or agent.get("extensionId") or agent.get("pluginId")
+            if not agent_id:
+                continue
+            display_name = agent.get("displayName") or agent.get("name") or agent_id
+            models.append(
+                {
+                    "id": f"copilot-agent-{agent_id}",
+                    "object": "model",
+                    "created": now,
+                    "owned_by": "microsoft-365",
+                    "display_name": display_name,
+                }
+            )
+    except Exception:
+        pass  # Token not yet available or endpoint unsupported — return defaults only
+    return {"object": "list", "data": models}
 
 
 @app.post("/v1/chat/completions")
@@ -208,7 +277,7 @@ async def chat_completions(request: ChatCompletionRequest):
 
 def _handle_non_streaming(access_token: str, user_message: str, model: str):
     """Non-streaming response — return full JSON."""
-    graph_data = _call_copilot(access_token, user_message)
+    graph_data = _call_copilot(access_token, user_message, model)
     return _build_openai_response(graph_data, model)
 
 
@@ -220,7 +289,7 @@ def _handle_streaming(access_token: str, user_message: str, model: str):
     Most AI agent frameworks (Hermes, OpenClaw, etc.) use streaming by default,
     so this is required for compatibility.
     """
-    graph_data = _call_copilot(access_token, user_message)
+    graph_data = _call_copilot(access_token, user_message, model)
     response_data = _build_openai_response(graph_data, model)
 
     response_id = response_data["id"]
